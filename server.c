@@ -3,12 +3,13 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <pthread.h>
-#include <netinet/tcp.h>
+#include "Connection.h"
 
 
 
@@ -23,13 +24,22 @@ enum constants {
 	NO_FLAGS = 0
 };
 
+void* commands(void* data) 
+{
+	int* p_lsn_sck = data;
 
+	char buf[BUFSIZE];
+	while(1) {
+		memset(buf, 0, BUFSIZE);
+		scanf("%s", buf);
+		if (strcmp("stop", buf) == 0) {
+			unlink(SUN_PATH);
+			close(*p_lsn_sck);
+			exit(0);
+		}
+	}
+}
 
-struct accept_inf {
-	int sockfd;
-	struct sockaddr addr;
-	socklen_t addrlen;
-};
 
 
 void* response(void *data) {
@@ -38,83 +48,84 @@ void* response(void *data) {
 	printf("Accepted successfully\n");
 
 	int* sockfd = (int*) data;
-
 	int count = 0;
+	if  (recv(*sockfd, &count, sizeof(int), NO_FLAGS) != sizeof(int)) {
+		printf("Cannot get amount of bytes\n");
+		goto end;
+	}	
+
+	int res = 0;
 	do {
-		count = recv(*sockfd, buf, BUFSIZE, NO_FLAGS);
-		send(*sockfd, buf, count, NO_FLAGS);
-	} while(count == BUFSIZE);
-	shutdown(*sockfd, SHUT_RDWR);
+		res = recv(*sockfd, buf, BUFSIZE, NO_FLAGS);
+		if (res <= 0) {
+			printf("Client is dead\n");
+
+			goto end;
+		}
+		count-=res;
+
+		send(*sockfd, buf, res, NO_FLAGS);
+	} while(count != 0);
+
+	send(*sockfd, "SERV", strlen("SERV"), NO_FLAGS);
+
+	end:
+	close(*sockfd);
 	free(sockfd);
 
 	return NULL;
 }
 
 
-int main() {
+int main() 
+{
+	sigset_t mask;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGPIPE);
+	sigprocmask(SIG_BLOCK, &mask, NULL);
+
 	int optval_true = 1;
 
-	int lsn_sck = socket(AF_INET, SOCK_STREAM, STD_PROTOCOL);
+	int lsn_sck = socket(AF_UNIX, SOCK_STREAM, STD_PROTOCOL);
 	if (lsn_sck == -1) {
-		printf("Cannot create socket\n");
-		exit(0);
+		perror("socket");
+		exit((EXIT_FAILURE));
 	}
 	setsockopt(lsn_sck, SOL_SOCKET, SO_REUSEADDR, &optval_true, sizeof(optval_true));
 
-	struct sockaddr_in lsn_addr;
-	lsn_addr.sin_family = AF_INET;
-	lsn_addr.sin_port = htons(50000);
-	lsn_addr.sin_addr.s_addr = INADDR_ANY;
+	struct sockaddr_un lsn_addr;
+	memset(&lsn_addr, 0, sizeof(lsn_addr));
+	lsn_addr.sun_family = AF_UNIX;
+	strncpy(lsn_addr.sun_path, SUN_PATH, sizeof(lsn_addr.sun_path) - 1);
 
 
-
-	if  (bind(lsn_sck, &lsn_addr, sizeof(struct sockaddr_in)) != 0) {
-		printf("Cannot bind listen socket\n");
-		exit(0);
+	if  (bind(lsn_sck, &lsn_addr, sizeof(struct sockaddr_un)) != 0) {
+		perror("bind");
+		exit(EXIT_FAILURE);
 	}
 	if (listen(lsn_sck, QUEUE_LEN) != 0) {
-		printf("Listen error\n");
-		exit(0);
+		perror("listen");
+		exit(EXIT_FAILURE);
 	}
 
-	int br_sck = socket(AF_INET, SOCK_DGRAM, STD_PROTOCOL);
-	setsockopt(br_sck, SOL_SOCKET, SO_BROADCAST, &optval_true, sizeof(optval_true));
-
-	struct sockaddr_in br_addr;
-	br_addr.sin_family = AF_INET;
-	br_addr.sin_port = htons(50000);
-	br_addr.sin_addr.s_addr = INADDR_BROADCAST;
+	pthread_t tmp_thr;
+	if (pthread_create(&tmp_thr, NULL, commands, &lsn_sck) != 0) {
+		perror("pthread_create");
+		exit(EXIT_FAILURE);
+	}
 
 
-
-	fcntl(lsn_sck, F_SETFL, O_NONBLOCK);
 	while(1) {
-		int smth = 0;
-		sendto(br_sck, &smth, sizeof(smth), NO_FLAGS, (struct sockaddr*) &br_addr, sizeof(br_addr));
-
-		
-		
 		int sockfd = accept(lsn_sck, NULL, 0);
 		if (sockfd == -1) {
-			sleep(1);
-			continue;
+			perror("accept");
+			exit(EXIT_FAILURE);
 		}
-		setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &optval_true, sizeof(optval_true));
-		int cnt = 2;
-		setsockopt(sockfd, SOL_SOCKET, TCP_KEEPCNT, &cnt, sizeof(cnt));
-		int idle = 10;
-		setsockopt(sockfd, SOL_SOCKET, TCP_KEEPIDLE, &idle, sizeof(idle));
-		int intvl = 5;
-		setsockopt(sockfd, SOL_SOCKET, TCP_KEEPINTVL, &intvl, sizeof(intvl));
 
+		int* p_sck =(int*) calloc(1, sizeof(int));
+		*p_sck = sockfd;
 
-		int* sck =(int*) calloc(1, sizeof(int));
-		*sck = sockfd;
-		
-
-		pthread_t tmp;
-
-		pthread_create(&tmp, NULL, response, sck);
+		pthread_create(&tmp_thr, NULL, response, p_sck);
 	}
 
 	close(lsn_sck);

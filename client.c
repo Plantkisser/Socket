@@ -2,10 +2,11 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
+#include <sys/un.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <netinet/tcp.h>
+#include <signal.h>
+#include "Connection.h"
 
 
 
@@ -18,68 +19,60 @@ enum constants {
 };
 
 
-int main() {
-	int optval_true = 1;
-	
-	int br_sck = socket(AF_INET, SOCK_DGRAM, STD_PROTOCOL);
-	if (br_sck == -1) {
-		printf("Cannot create broadcast socket\n");
-		exit(0);
-	}
-	setsockopt(br_sck, SOL_SOCKET, SO_BROADCAST, &optval_true, sizeof(optval_true));
-	setsockopt(br_sck, SOL_SOCKET, SO_REUSEADDR, &optval_true, sizeof(optval_true));
+int main() 
+{
+	sigset_t mask;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGPIPE);
+	sigprocmask(SIG_BLOCK, &mask, NULL);
 
-	struct sockaddr_in br_addr;
-	br_addr.sin_family = AF_INET;
-	br_addr.sin_port = htons(50000);
-	br_addr.sin_addr.s_addr = INADDR_ANY;
-
-	bind(br_sck, (struct sockaddr *) &br_addr, sizeof(br_addr));
-
-	struct sockaddr_in serv_addr;
+	struct sockaddr_un serv_addr;
 	memset(&serv_addr, 0, sizeof(serv_addr));
-	
-	char buf[BUFSIZE];
-	socklen_t tmp_size = sizeof(serv_addr);
-	recvfrom(br_sck, buf, sizeof(buf), NO_FLAGS, (struct sockaddr *) &serv_addr, &tmp_size);
-	close(br_sck);
+	serv_addr.sun_family = AF_UNIX;
+	strncpy(serv_addr.sun_path, SUN_PATH, sizeof(serv_addr.sun_path) - 1);
 
-	serv_addr.sin_port = htons(50000);
-	serv_addr.sin_family = AF_INET;
-
-
-	int mn_sck = socket(AF_INET, SOCK_STREAM, STD_PROTOCOL);
+	int mn_sck = socket(AF_UNIX, SOCK_STREAM, STD_PROTOCOL);
 	if (mn_sck == -1) {
-		printf("Cannot create main socket\n");
-		close(br_sck);
-		exit(0);
+		perror("socket");
+		exit(EXIT_FAILURE);
 	}
-	connect(mn_sck, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
-
-	setsockopt(mn_sck, SOL_SOCKET, SO_KEEPALIVE, &optval_true, sizeof(optval_true));
-	int cnt = 2;
-	setsockopt(mn_sck, SOL_SOCKET, TCP_KEEPCNT, &cnt, sizeof(cnt));
-	int idle = 10;
-	setsockopt(mn_sck, SOL_SOCKET, TCP_KEEPIDLE, &idle, sizeof(idle));
-	int intvl = 5;
-	setsockopt(mn_sck, SOL_SOCKET, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+	if (connect(mn_sck, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) == -1) {
+		perror("connect");
+		exit(EXIT_FAILURE);
+	}
 
 
 
-
+	char buf[BUFSIZE];
 	memset(buf, 0, BUFSIZE);
 
 	printf("Write message:\n");
 	scanf("%s", buf);
 
+	int len = strlen(buf);
+	send(mn_sck, &len, sizeof(len), NO_FLAGS);
 	send(mn_sck, buf, strlen(buf), NO_FLAGS);
 
+
 	memset(buf, 0, BUFSIZE);
-	recv(mn_sck, buf, BUFSIZE, NO_FLAGS);
 
-	printf("Your message:\n%s\n", buf);
+	len += 4; // beccause serv concatenate "SERV" in the end 
+	int count = 0;
+	printf("Your message:\n");
+	int res = 0;
+	while(count != len) {
+		res = recv(mn_sck, buf, BUFSIZE, NO_FLAGS);
+		if (res == 0)
+		{
+			printf("\nServer is dead\n");
+			return 0;
+		}
+		count += res;
+		printf("%s", buf);
+	}
+	printf("\n");
 
-	shutdown(mn_sck, SHUT_RDWR);
+	close(mn_sck);
 
 	return 0;
 }
