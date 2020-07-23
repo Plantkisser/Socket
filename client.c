@@ -12,7 +12,7 @@
 
 
 enum constants {
-	BUFSIZE = 100,
+	BUFSIZE = 400,
 	NO_FLAGS = 0,
 	STD_PROTOCOL = 0,
 	O_FLAGS = 0
@@ -56,11 +56,12 @@ int main()
 
 	memset(buf, 0, BUFSIZE);
 
-	len += 4; // beccause serv concatenate "SERV" at the end 
+	len += 4; // beccause serv concatenate "SERV" in the end 
 	int count = 0;
 	printf("Your message:\n");
 	int res = 0;
 	while(count != len) {
+		memset(buf, 0, BUFSIZE);
 		res = recv(mn_sck, buf, BUFSIZE, NO_FLAGS);
 		if (res == 0)
 		{
@@ -68,6 +69,7 @@ int main()
 			return 0;
 		}
 		count += res;
+		sleep(1);
 		printf("%s", buf);
 	}
 	printf("\n");

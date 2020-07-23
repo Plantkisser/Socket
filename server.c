@@ -18,7 +18,7 @@
 
 
 enum constants {
-	BUFSIZE = 100,
+	BUFSIZE = 30,
 	STD_PROTOCOL = 0,
 	QUEUE_LEN = 30, 
 	NO_FLAGS = 0
