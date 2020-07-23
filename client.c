@@ -56,7 +56,7 @@ int main()
 
 	memset(buf, 0, BUFSIZE);
 
-	len += 4; // beccause serv concatenate "SERV" in the end 
+	len += 4; // beccause serv concatenate "SERV" at the end 
 	int count = 0;
 	printf("Your message:\n");
 	int res = 0;
