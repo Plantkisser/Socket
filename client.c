@@ -12,10 +12,11 @@
 
 
 enum constants {
-	BUFSIZE = 400,
+	BUFSIZE = 4000,
 	NO_FLAGS = 0,
 	STD_PROTOCOL = 0,
-	O_FLAGS = 0
+	O_FLAGS = 0,
+	STDIN = 0
 };
 
 
@@ -47,7 +48,7 @@ int main()
 	memset(buf, 0, BUFSIZE);
 
 	printf("Write message:\n");
-	scanf("%s", buf);
+	read(STDIN, buf, BUFSIZE);
 
 	int len = strlen(buf);
 	send(mn_sck, &len, sizeof(len), NO_FLAGS);
@@ -69,7 +70,6 @@ int main()
 			return 0;
 		}
 		count += res;
-		sleep(1);
 		printf("%s", buf);
 	}
 	printf("\n");
